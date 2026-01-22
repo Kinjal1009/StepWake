@@ -1,4 +1,4 @@
-# StepWake ⏰🚶‍♂️ - A Flutter project
+# StepWake ⏰🚶‍♂️ - A Flutter Vibe Coding Project
 
 > **The alarm clock that makes you walk to wake up**
 
