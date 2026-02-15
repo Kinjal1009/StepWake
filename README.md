@@ -9,7 +9,7 @@ StepWake is a behavioral-intervention alarm app designed for ambitious individua
 [![AI-Powered](https://img.shields.io/badge/Built%20with-AI%20Vibe%20Coding-purple)](https://aistudio.google.com/)
 
 ---
-| ![WhatsApp Image 2026-02-15 at 10 57 28 PM](https://github.com/user-attachments/assets/9f4d7009-3e58-48a7-be96-5b35ea60b736) | ![WhatsApp Image 2026-02-15 at 10 57 27 PM](https://github.com/user-attachments/assets/f9f17ebc-582b-4bfb-b3c6-f6528a3fed55) | ![WhatsApp Image 2026-02-15 at 11 01 35 PM](https://github.com/user-attachments/assets/2c4cefe2-3d19-4c25-bce5-c60c41007071) |
+![WhatsApp Image 2026-02-15 at 10 57 28 PM](https://github.com/user-attachments/assets/9f4d7009-3e58-48a7-be96-5b35ea60b736)![WhatsApp Image 2026-02-15 at 10 57 27 PM](https://github.com/user-attachments/assets/f9f17ebc-582b-4bfb-b3c6-f6528a3fed55)![WhatsApp Image 2026-02-15 at 11 01 35 PM](https://github.com/user-attachments/assets/2c4cefe2-3d19-4c25-bce5-c60c41007071)
 
 ## 🎯 Problem Statement
 
