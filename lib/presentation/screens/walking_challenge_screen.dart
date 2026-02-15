@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:widgetbook_annotation/widgetbook_annotation.dart';
 import '../../core/preview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'dart:math' as math;
-import 'package:alarm/alarm.dart' as sys_alarm;
+import '../../services/native_alarm_service.dart';
 import '../../core/services/ringtone_service.dart';
 import '../providers/alarm_provider.dart';
 import '../../domain/entities/alarm.dart';
@@ -33,18 +34,36 @@ class _WalkingChallengeScreenState
   Timer? _timer;
   DateTime? _lastMotionTime;
   int _requiredSeconds = 30;
+  bool _hasLoadedDuration = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRequiredSeconds();
     _startTracking();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_hasLoadedDuration) {
+      _loadRequiredSeconds();
+      _hasLoadedDuration = true;
+    }
   }
 
   void _loadRequiredSeconds() {
     final activeAlarm = ref.read(appStateProvider).activeAlarm;
     if (activeAlarm != null) {
-      _requiredSeconds = activeAlarm.walkMinutes * 60;
+      setState(() {
+        _requiredSeconds = activeAlarm.walkMinutes * 60;
+      });
+      print(
+        'Loaded walk duration: ${activeAlarm.walkMinutes} minutes ($_requiredSeconds seconds)',
+      );
+    } else {
+      print(
+        'No active alarm found, using default duration: $_requiredSeconds seconds',
+      );
     }
   }
 
@@ -92,16 +111,30 @@ class _WalkingChallengeScreenState
     });
   }
 
-  void _complete() {
+  Future<void> _complete() async {
     _timer?.cancel();
     _sensorSub?.cancel();
     ref.read(ringtoneServiceProvider).stop();
-    sys_alarm.Alarm.stopAll();
+
+    final activeAlarm = ref.read(appStateProvider).activeAlarm;
+
+    // Stop the native alarm sound
+    await NativeAlarmService.stopAlarm();
+
+    if (activeAlarm != null) {
+      // Handle rescheduling or disabling based on recurrence
+      await ref.read(alarmsProvider.notifier).handleAlarmFinished(activeAlarm);
+    } else {
+      // Fallback
+      await NativeAlarmService.stopAlarm();
+    }
+
     ref.read(appStateProvider.notifier).setMode(AppMode.idle);
     ref.read(appStateProvider.notifier).setActiveAlarm(null);
 
     if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/');
+      // Close the app instead of navigating to home
+      SystemNavigator.pop();
     }
   }
 
@@ -112,120 +145,175 @@ class _WalkingChallengeScreenState
     super.dispose();
   }
 
+  String _formatTime(int totalSeconds) {
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final progress = _elapsedSeconds / _requiredSeconds;
     final remaining = _requiredSeconds - _elapsedSeconds;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF020617),
-      body: SafeArea(
-        child: Container(
-          width: double.infinity,
-          height: double.infinity,
-          padding: const EdgeInsets.all(40),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text(
-                'WALKING CHALLENGE',
-                style: TextStyle(
-                  color: Colors.indigoAccent,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14,
-                  letterSpacing: 4,
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF020617),
+        body: SafeArea(
+          child: Container(
+            width: double.infinity,
+            height: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+            child: Column(
+              children: [
+                const Text(
+                  'ALARM RINGING',
+                  style: TextStyle(
+                    color: Color(0xFFEF4444), // Red 500
+                    fontWeight: FontWeight.w900,
+                    fontSize: 24,
+                    letterSpacing: 3,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _isMoving ? 'Keep moving!' : 'Motion stopped! Progress reset.',
-                style: TextStyle(
-                  color: _isMoving ? Colors.greenAccent : Colors.redAccent,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                const SizedBox(height: 16),
+                const Text(
+                  'WALK TO STOP',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-              const SizedBox(height: 64),
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  SizedBox(
-                    width: 240,
-                    height: 240,
-                    child: CircularProgressIndicator(
-                      value: progress,
-                      strokeWidth: 12,
-                      backgroundColor: Colors.white.withValues(alpha: 0.05),
-                      color: _isMoving
-                          ? Colors.indigoAccent
-                          : Colors.redAccent.withValues(alpha: 0.3),
-                      strokeCap: StrokeCap.round,
+                Expanded(
+                  child: Center(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 280,
+                          height: 280,
+                          child: CircularProgressIndicator(
+                            value: 1.0 - progress, // Countdown style
+                            strokeWidth: 20,
+                            backgroundColor: const Color(
+                              0xFF1E293B,
+                            ), // Slate 800
+                            color: _isMoving
+                                ? const Color(0xFF34D399) // Emerald 400
+                                : const Color(
+                                    0xFF1E293B,
+                                  ), // dim when not moving or red? Image shows green tick mark style
+                            strokeCap: StrokeCap.round,
+                          ),
+                        ),
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              _formatTime(remaining),
+                              style: const TextStyle(
+                                fontSize: 64,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                height: 1.0,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'REMAINING',
+                              style: TextStyle(
+                                color: Colors.white38,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 2,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        '${remaining}s',
-                        style: const TextStyle(
-                          fontSize: 48,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const Text(
-                        'TO GO',
-                        style: TextStyle(
-                          color: Colors.white38,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                    ],
+                ),
+                Text(
+                  _isMoving ? 'KEEP MOVING' : 'START WALKING',
+                  style: TextStyle(
+                    color: _isMoving
+                        ? const Color(0xFF34D399)
+                        : Colors.white38, // Emerald 400
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
                   ),
-                ],
-              ),
-              const SizedBox(height: 64),
-              _buildMotionIndicator(),
-            ],
+                ),
+                const SizedBox(height: 32),
+                _buildMotionBar(),
+                const SizedBox(height: 48),
+                const Text(
+                  'MOTION DETECTION ACTIVE',
+                  style: TextStyle(
+                    color: Colors.white24,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 3,
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildMotionIndicator() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      decoration: BoxDecoration(
-        color: (_isMoving ? Colors.greenAccent : Colors.redAccent).withValues(
-          alpha: 0.1,
-        ),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            _isMoving ? Icons.directions_run : Icons.pause,
-            color: _isMoving ? Colors.greenAccent[400] : Colors.redAccent[400],
-            size: 20,
+  Widget _buildMotionBar() {
+    final progress = _elapsedSeconds / _requiredSeconds;
+    final barWidth = MediaQuery.of(context).size.width - 48;
+
+    return Column(
+      children: [
+        Container(
+          height: 12,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(6),
           ),
-          const SizedBox(width: 8),
-          Text(
-            _isMoving ? 'WALKING DETECTED' : 'STATIONARY',
-            style: TextStyle(
-              color: _isMoving
-                  ? Colors.greenAccent[400]
-                  : Colors.redAccent[400],
-              fontWeight: FontWeight.w900,
-              fontSize: 12,
-              letterSpacing: 1,
+          alignment: Alignment.centerLeft,
+          child: AnimatedContainer(
+            duration: Duration(seconds: _requiredSeconds),
+            curve: Curves.linear,
+            width: _isMoving ? barWidth * progress : 0,
+            decoration: BoxDecoration(
+              color: const Color(0xFF34D399),
+              borderRadius: BorderRadius.circular(6),
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'STILL',
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              'WALKING',
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

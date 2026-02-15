@@ -1,7 +1,6 @@
-import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:alarm/alarm.dart' as sys_alarm;
+import '../../services/native_alarm_service.dart';
 import '../../data/repositories/alarm_repository_impl.dart';
 import '../../domain/entities/alarm.dart' as entity;
 import '../../domain/repositories/alarm_repository.dart';
@@ -21,8 +20,11 @@ final alarmRepositoryProvider = Provider<AlarmRepository>((ref) {
 class AlarmNotifier extends StateNotifier<List<entity.Alarm>> {
   final AlarmRepository repository;
 
-  AlarmNotifier({required this.repository}) : super([]) {
-    _loadAlarms();
+  AlarmNotifier({required this.repository, List<entity.Alarm>? initialAlarms})
+    : super(initialAlarms ?? []) {
+    if (initialAlarms == null) {
+      _loadAlarms();
+    }
   }
 
   Future<void> _loadAlarms() async {
@@ -31,10 +33,8 @@ class AlarmNotifier extends StateNotifier<List<entity.Alarm>> {
   }
 
   Future<void> _syncSystemAlarms() async {
-    final currentSystemAlarms = await sys_alarm.Alarm.getAlarms();
-    for (final systemAlarm in currentSystemAlarms) {
-      await sys_alarm.Alarm.stop(systemAlarm.id);
-    }
+    // With native implementation, re-scheduling with same ID overwrites the previous one.
+    // So we just iterate and schedule enabled alarms.
 
     for (final alarm in state) {
       if (alarm.isEnabled) {
@@ -74,26 +74,12 @@ class AlarmNotifier extends StateNotifier<List<entity.Alarm>> {
       scheduledTime = scheduledTime.add(Duration(days: daysUntilNext));
     }
 
-    final alarmSettings = sys_alarm.AlarmSettings(
-      id: alarm.id.hashCode,
-      dateTime: scheduledTime,
-      assetAudioPath: 'assets/audio/alarm.mp3',
-      loopAudio: true,
-      vibrate: true,
-      volume: 0.8, // Use actual volume so alarm triggers properly
-      fadeDuration: 0.0,
-      androidFullScreenIntent: true,
-      warningNotificationOnKill: true,
-      notificationSettings: sys_alarm.NotificationSettings(
-        title:
-            'StepWake Alarm - ${alarm.label.isEmpty ? "Wake Up!" : alarm.label}',
-        body: 'Time to wake up and walk!',
-        stopButton: null,
-        icon: 'notification_icon',
-      ),
-    );
-
-    await sys_alarm.Alarm.set(alarmSettings: alarmSettings);
+    // Native Alarm Scheduling
+    final delayMillis = scheduledTime.difference(DateTime.now()).inMilliseconds;
+    if (delayMillis > 0) {
+      // Use native service
+      await NativeAlarmService.scheduleAlarm(alarm.id.hashCode, delayMillis);
+    }
   }
 
   Future<void> addAlarm(entity.Alarm alarm) async {
@@ -121,6 +107,18 @@ class AlarmNotifier extends StateNotifier<List<entity.Alarm>> {
     final alarm = state.firstWhere((a) => a.id == id);
     await updateAlarm(alarm.copyWith(isEnabled: !alarm.isEnabled));
   }
+
+  Future<void> handleAlarmFinished(entity.Alarm alarm) async {
+    if (alarm.days.isEmpty) {
+      // One-off alarm: disable it
+      // This will trigger updateAlarm -> _syncSystemAlarms -> which handles native sync
+      await toggleAlarm(alarm.id);
+    } else {
+      // Recurring alarm: reschedule for next occurrence
+      // The native alarm is one-shot, so we must schedule the next one explicitly
+      await _scheduleSystemAlarm(alarm);
+    }
+  }
 }
 
 final alarmsProvider = StateNotifierProvider<AlarmNotifier, List<entity.Alarm>>(
@@ -133,12 +131,13 @@ final alarmsProvider = StateNotifierProvider<AlarmNotifier, List<entity.Alarm>>(
 class AppState {
   final entity.AppMode mode;
   final entity.Alarm? activeAlarm;
-  final String globalRingtone;
+  final String
+  globalRingtone; // Kept for compatibility but not used by native alarm
 
   AppState({
     this.mode = entity.AppMode.idle,
     this.activeAlarm,
-    required this.globalRingtone,
+    this.globalRingtone = '',
   });
 
   AppState copyWith({

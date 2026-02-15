@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:widgetbook_annotation/widgetbook_annotation.dart';
@@ -276,8 +277,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     return WalkingChallenge(
       requiredSeconds: alarm.walkMinutes * 60,
       onComplete: () {
-        ref.read(appStateProvider.notifier).setMode(AppMode.idle);
-        ref.read(appStateProvider.notifier).setActiveAlarm(null);
+        SystemNavigator.pop();
       },
     );
   }
